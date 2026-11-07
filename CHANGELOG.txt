@@ -1,0 +1,28 @@
+Pocket-Check (plugin) - Changelog
+=================================
+openFPGA Pocket updater plugin. Scans the Pocket SD card (Assets, Cores,
+Platforms, Presets) for missing / empty / orphaned / mismatched ROMs and
+instance .json files. Read-only: nothing on the card is ever changed.
+
+v0.1.0 - 2026-11-07
+  - First version: Rust port of Pocket-Check.py v0.6.1 for
+    https://github.com/openfpga-library/pocket-plugin
+  - Same checks and report as the script: cores, platforms, presets, instance
+    JSONs (missing / empty / orphan ROMs, case mismatches, bad JSON), Analogizer /
+    jtpatreon / coinopkey / .sav / "._*" skipping, ignore list, unified
+    "== Ignored files (N) ==" section
+  - Menu instead of command-line options:
+      Scan the whole card / Scan one platform... (id or glob, comma separated)
+      Default / Also check .sav / Also check Analogizer/CRT / Check both
+  - Files live in the plugin's host/ folder (SD root if the host app has none):
+      Pocket-Check-Ignore.txt     created with instructions on first run
+      Pocket-Check-Report.txt     rewritten on every run
+      Pocket-Check-Manifest.json  optional, { "file.rom": {"size": 1234} }
+  - Long reports are summarised in the log (counts per category); the full
+    text is always in Pocket-Check-Report.txt
+
+  Differences from the Python script
+  - No --crc / crc32 manifest entries (only "size" is checked), no --rom-ext,
+    --no-orphans, --no-cores, --out, --no-report
+  - Ignore-list wildcards support * and ? only (no [abc] sets)
+  - Old Ignore-Cores.txt / ignore_cores.txt files are not carried over

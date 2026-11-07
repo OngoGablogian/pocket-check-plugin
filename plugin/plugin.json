@@ -1,0 +1,6 @@
+{
+  "name": "Pocket-Check",
+  "description": "Scans the Pocket SD card (Assets, Cores, Platforms, Presets) for missing, empty, orphaned or mismatched ROMs and instance .json files, and writes a report",
+  "allowed_hosts": [],
+  "logo_url": "https://raw.githubusercontent.com/openfpga-library/pocket-plugin/main/plugin_icon.png"
+}
