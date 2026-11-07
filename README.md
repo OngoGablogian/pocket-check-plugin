@@ -5,7 +5,8 @@ hosts) that scans your Analogue Pocket SD card for missing, empty, orphaned or m
 instance `.json` files, and writes a report. It is a Rust port of the `Pocket-Check.py` script.
 
 Pocket-Check never changes your games, cores or settings. The only files it writes are its own report and ignore
-list (plus an optional manifest you create yourself), in the plugin's own folder on your computer.
+list (plus an optional manifest you create yourself), in the plugin's own folder on the SD card. Nothing is written
+to your computer.
 
 ## Features
 
@@ -65,16 +66,16 @@ The `.sav` and Analogizer items can be included from the menu. The beta items ar
    `jtbubl` or `jt*`; several can be separated with commas).
 3. Choose what to check: **Default**, **Also check .sav files**, **Also check Analogizer/CRT files**
    or **Check .sav and Analogizer files**.
-4. Read the summary in the log, or open `Pocket-Check-Report.txt` from the plugin's folder for the full report.
+4. Read the summary in the log, or open `Pocket-Check-Report.txt` from the plugin's folder on the SD card for the full report.
 
 The plugin's version is shown in the title of each menu, so you can tell which build is running.
 
 ## Files
 
-These are kept in the plugin's own folder on your computer. In pupdate that is the plugin's folder under `plugins`
-next to the updater, for example `\plugins\OngoGablogian.pocket-check-plugin\`. If the updater doesn't provide a
-plugin folder, or it can't be written to, the plugin uses the root of the SD card instead. The log says where each file
-ended up.
+These are kept on the SD card, in the plugin's own folder, where pupdate installs the plugin:
+`\plugins\OngoGablogian.pocket-check-plugin\` (next to `plugin.wasm` and `plugin.json`). If that folder can't be
+written to, the plugin uses the root of the SD card instead. Nothing is written to the computer, and the log says where
+each file ended up.
 
 | File | Purpose |
 | --- | --- |
@@ -82,8 +83,12 @@ ended up.
 | `Pocket-Check-Report.txt` | The full report. Rewritten on every run. |
 | `Pocket-Check-Manifest.json` | Optional. Expected ROM sizes: `{ "sf2.rom": { "size": 4194304 } }` (keys are matched case-insensitively). |
 
-If you have an ignore list in the root of the SD card from v0.1.2, it is copied to the plugin's folder the first time
-you run v0.2.0 or newer. The old copy is left in place and is no longer used, so you can delete it.
+If an earlier version left an ignore list in the root of the SD card or in the updater's private plugin folder on the
+computer, it is copied to the plugin's folder on the SD card the first time you run v0.2.1 or newer. The old copy is
+left in place and is no longer used, so you can delete it.
+
+The folder name comes from the GitHub owner and repository name (`<owner>.<repo>`). If you publish the plugin under a
+different owner or name, change `PLUGIN_DIR` at the top of the file-location code in `plugin/src/lib.rs` to match.
 
 ### Ignore list
 

@@ -4,9 +4,9 @@
 //! `pocket/` folder) for missing / empty / orphaned / mismatched ROMs and instance
 //! .json files, and writes a report. It never changes anything on the card.
 //!
-//! Files the user can read and edit live in the plugin's own folder on the computer (the
-//! `host/` folder - in pupdate that is \plugins\<owner>.<repo>\), falling back to the root of
-//! the SD card if the host app doesn't provide one or it can't be written to:
+//! Files the user can read and edit live on the SD card, in the plugin's own folder
+//! (`/plugins/OngoGablogian.pocket-check-plugin/` - the folder pupdate puts the plugin in),
+//! falling back to the root of the SD card. Nothing is written to the computer.
 //!   Pocket-Check-Ignore.txt     ignore list (created on first run)
 //!   Pocket-Check-Manifest.json  optional: { "sf2.rom": { "size": 4194304 } }
 //!   Pocket-Check-Report.txt     the report (rewritten every run)
@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "0.2.0";
+const VERSION: &str = "0.2.1";
 const REPORT_NAME: &str = "Pocket-Check-Report.txt";
 const MANIFEST_NAME: &str = "Pocket-Check-Manifest.json";
 /// Reports longer than this many lines are summarised in the log (full text is in the file)
@@ -145,16 +145,22 @@ pub fn handle_response(input: HostMessage) -> FnResult<PluginMessage> {
     }
 }
 
-/// The files you read and edit live in the plugin's own folder (`host/`, e.g. in pupdate
-/// \plugins\<owner>.<repo>\). The root of the SD card is only a fallback, e.g. if the host app
-/// doesn't provide a plugin folder.
-const HOST_DIR: &str = "host";
+/// The files you read and edit live on the SD card, in the plugin's own folder - the folder
+/// pupdate installs the plugin into (named <github owner>.<repo>). If you publish the plugin
+/// under a different GitHub owner or repo name, change this to match.
+const PLUGIN_DIR: &str = "pocket/plugins/OngoGablogian.pocket-check-plugin";
+/// Fallback if the plugin's folder can't be written to.
 const SD_ROOT: &str = "pocket";
+/// The host app's private folder on the computer. Only READ, to pick up files that older
+/// versions (v0.1.0, v0.1.1, v0.2.0) left there; nothing is ever written to it.
+const HOST_DIR: &str = "host";
 
 /// Human-readable location for the log.
 fn show(path: &str) -> String {
-    if let Some(name) = path.strip_prefix("host/") {
-        format!("the plugin's folder ({name})")
+    if let Some(name) = path.strip_prefix(&format!("{PLUGIN_DIR}/")) {
+        format!("the plugin's folder on the SD card ({name})")
+    } else if let Some(name) = path.strip_prefix("host/") {
+        format!("the updater's private plugin folder on the computer ({name})")
     } else if let Some(name) = path.strip_prefix("pocket/") {
         format!("the SD card root ({name})")
     } else {
@@ -166,11 +172,19 @@ fn exists(path: &str) -> bool {
     fs::File::open(path).is_ok()
 }
 
-/// Write a file to the plugin's folder, or to the SD card root if that fails.
+/// Make sure /plugins/<this plugin>/ exists on the card (it normally does). Uses create_dir,
+/// which only fails harmlessly if the folder is already there.
+fn ensure_plugin_dir() {
+    let _ = fs::create_dir("pocket/plugins");
+    let _ = fs::create_dir(PLUGIN_DIR);
+}
+
+/// Write a file to the plugin's folder on the SD card, or to the SD card root if that fails.
 /// `atomic` writes to a .tmp file first and renames it, so a stopped run never leaves half a file.
 fn save(name: &str, data: &[u8], atomic: bool) -> Result<String, String> {
     let mut errors: Vec<String> = Vec::new();
-    for dir in [HOST_DIR, SD_ROOT] {
+    ensure_plugin_dir();
+    for dir in [PLUGIN_DIR, SD_ROOT] {
         let path = format!("{dir}/{name}");
         let res = if atomic {
             let tmp = format!("{path}.tmp");
@@ -188,24 +202,29 @@ fn save(name: &str, data: &[u8], atomic: bool) -> Result<String, String> {
 
 fn run_scan(opts: check::Opts) {
     // ignore list - created with instructions on the first run
-    let host_ignore = format!("{HOST_DIR}/{}", ignore::IGNORE_NAME);
-    let sd_ignore = format!("{SD_ROOT}/{}", ignore::IGNORE_NAME);
+    let plugin_ignore = format!("{PLUGIN_DIR}/{}", ignore::IGNORE_NAME);
+    let older_ignore = [SD_ROOT, HOST_DIR]
+        .iter()
+        .map(|d| format!("{d}/{}", ignore::IGNORE_NAME))
+        .find(|p| exists(p));
     let mut created_note: Option<String> = None;
-    let ignore_path: Option<String> = if exists(&host_ignore) {
-        Some(host_ignore)
-    } else if exists(&sd_ignore) {
-        // made by v0.1.2 in the SD card root: copy it into the plugin's folder
-        match fsx::read_path(&sd_ignore).and_then(|b| fs::write(&host_ignore, &b)) {
+    let ignore_path: Option<String> = if exists(&plugin_ignore) {
+        Some(plugin_ignore)
+    } else if let Some(old) = older_ignore {
+        // left by an older version in the SD card root or the host folder: copy it into the
+        // plugin's folder on the SD card
+        ensure_plugin_dir();
+        match fsx::read_path(&old).and_then(|b| fs::write(&plugin_ignore, &b)) {
             Ok(()) => {
                 let n = format!(
-                    "Copied your ignore list from the SD card root to the plugin's folder ({}); the old copy on the card is no longer used and can be deleted",
-                    ignore::IGNORE_NAME
+                    "Copied your ignore list from {} to the plugin's folder on the SD card; the old copy is no longer used and can be deleted",
+                    show(&old)
                 );
                 say(&n);
                 created_note = Some(n);
-                Some(host_ignore)
+                Some(plugin_ignore)
             }
-            Err(_) => Some(sd_ignore),
+            Err(_) => Some(old),
         }
     } else {
         match save(ignore::IGNORE_NAME, ignore::DEFAULT_IGNORE_TEXT.as_bytes(), false) {
@@ -228,7 +247,7 @@ fn run_scan(opts: check::Opts) {
 
     // optional manifest: expected size per ROM filename
     let mut manifest: HashMap<String, u64> = HashMap::new();
-    let manifest_path = [HOST_DIR, SD_ROOT]
+    let manifest_path = [PLUGIN_DIR, SD_ROOT, HOST_DIR]
         .iter()
         .map(|d| format!("{d}/{MANIFEST_NAME}"))
         .find(|p| exists(p));

@@ -5,6 +5,18 @@ Platforms, Presets) for missing / empty / orphaned / mismatched ROMs and
 instance .json files. Never changes games, cores or settings; it only writes its
 own report / ignore list files.
 
+v0.2.1 - 2026-11-07
+  - Fixed: the report and ignore list were being written to the updater's private
+    "host" folder on the computer (v0.2.0), but pupdate runs from the SD card and
+    nothing should be written to the computer. They are now written to the plugin's
+    folder on the SD card, \plugins\OngoGablogian.pocket-check-plugin\, with the SD
+    card root as the only fallback. The host folder is never written to
+  - An ignore list left in the SD card root (v0.1.2) or in the host folder
+    (v0.1.0, v0.1.1, v0.2.0) is copied into the plugin's folder on the SD card the
+    first time this version runs (the old copy is left alone)
+  - The log says "the plugin's folder on the SD card", "the SD card root" or "the
+    updater's private plugin folder on the computer" for each file
+
 v0.2.0 - 2026-11-07
   - The report, ignore list and optional manifest are now kept in the plugin's own
     folder on the computer (the "host" folder; in pupdate
