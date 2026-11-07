@@ -4,8 +4,9 @@
 //! `pocket/` folder) for missing / empty / orphaned / mismatched ROMs and instance
 //! .json files, and writes a report. It never changes anything on the card.
 //!
-//! Files the user can read and edit live in the root of the SD card (falling back to the
-//! plugin's private `host/` folder if the card can't be written to):
+//! Files the user can read and edit live in the plugin's own folder on the computer (the
+//! `host/` folder - in pupdate that is \plugins\<owner>.<repo>\), falling back to the root of
+//! the SD card if the host app doesn't provide one or it can't be written to:
 //!   Pocket-Check-Ignore.txt     ignore list (created on first run)
 //!   Pocket-Check-Manifest.json  optional: { "sf2.rom": { "size": 4194304 } }
 //!   Pocket-Check-Report.txt     the report (rewritten every run)
@@ -20,7 +21,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "0.1.2";
+const VERSION: &str = "0.2.0";
 const REPORT_NAME: &str = "Pocket-Check-Report.txt";
 const MANIFEST_NAME: &str = "Pocket-Check-Manifest.json";
 /// Reports longer than this many lines are summarised in the log (full text is in the file)
@@ -81,7 +82,7 @@ pub fn start() -> FnResult<PluginMessage> {
     }
     Ok(PluginMessage::Choice {
         name: "main".to_string(),
-        query: "Pocket-Check - what do you want to scan?".to_string(),
+        query: format!("Pocket-Check v{VERSION} - what do you want to scan?"),
         choices: vec![M_WHOLE.to_string(), M_ONE.to_string(), M_EXIT.to_string()],
     })
 }
@@ -90,7 +91,7 @@ fn options_menu(filter: &str) -> PluginMessage {
     PluginMessage::Choice {
         // the platform filter travels in the question name, so no state is kept between calls
         name: format!("opts:{filter}"),
-        query: "Which files should be checked?".to_string(),
+        query: format!("Pocket-Check v{VERSION} - which files should be checked?"),
         choices: vec![
             O_DEFAULT.to_string(),
             O_SAV.to_string(),
@@ -144,17 +145,20 @@ pub fn handle_response(input: HostMessage) -> FnResult<PluginMessage> {
     }
 }
 
-/// The files you read and edit live in the root of the SD card, where they are easy to find.
-/// The plugin's private `host/` folder (somewhere inside the updater app's own data) is only
-/// a fallback, e.g. if the card can't be written to.
-const SD_ROOT: &str = "pocket";
+/// The files you read and edit live in the plugin's own folder (`host/`, e.g. in pupdate
+/// \plugins\<owner>.<repo>\). The root of the SD card is only a fallback, e.g. if the host app
+/// doesn't provide a plugin folder.
 const HOST_DIR: &str = "host";
+const SD_ROOT: &str = "pocket";
 
 /// Human-readable location for the log.
 fn show(path: &str) -> String {
-    match path.strip_prefix("pocket/") {
-        Some(name) => format!("the SD card root ({name})"),
-        None => format!("the plugin's host folder ({path})"),
+    if let Some(name) = path.strip_prefix("host/") {
+        format!("the plugin's folder ({name})")
+    } else if let Some(name) = path.strip_prefix("pocket/") {
+        format!("the SD card root ({name})")
+    } else {
+        path.to_string()
     }
 }
 
@@ -162,11 +166,11 @@ fn exists(path: &str) -> bool {
     fs::File::open(path).is_ok()
 }
 
-/// Write a file to the SD card root, or to the host folder if that fails.
+/// Write a file to the plugin's folder, or to the SD card root if that fails.
 /// `atomic` writes to a .tmp file first and renames it, so a stopped run never leaves half a file.
 fn save(name: &str, data: &[u8], atomic: bool) -> Result<String, String> {
     let mut errors: Vec<String> = Vec::new();
-    for dir in [SD_ROOT, HOST_DIR] {
+    for dir in [HOST_DIR, SD_ROOT] {
         let path = format!("{dir}/{name}");
         let res = if atomic {
             let tmp = format!("{path}.tmp");
@@ -184,24 +188,24 @@ fn save(name: &str, data: &[u8], atomic: bool) -> Result<String, String> {
 
 fn run_scan(opts: check::Opts) {
     // ignore list - created with instructions on the first run
-    let sd_ignore = format!("{SD_ROOT}/{}", ignore::IGNORE_NAME);
     let host_ignore = format!("{HOST_DIR}/{}", ignore::IGNORE_NAME);
+    let sd_ignore = format!("{SD_ROOT}/{}", ignore::IGNORE_NAME);
     let mut created_note: Option<String> = None;
-    let ignore_path: Option<String> = if exists(&sd_ignore) {
-        Some(sd_ignore)
-    } else if exists(&host_ignore) {
-        // made by an older version in the host folder: copy it to the SD card root so it can be found
-        match fsx::read_path(&host_ignore).and_then(|b| fs::write(&sd_ignore, &b)) {
+    let ignore_path: Option<String> = if exists(&host_ignore) {
+        Some(host_ignore)
+    } else if exists(&sd_ignore) {
+        // made by v0.1.2 in the SD card root: copy it into the plugin's folder
+        match fsx::read_path(&sd_ignore).and_then(|b| fs::write(&host_ignore, &b)) {
             Ok(()) => {
                 let n = format!(
-                    "Copied your ignore list from the plugin's host folder to the SD card root ({})",
+                    "Copied your ignore list from the SD card root to the plugin's folder ({}); the old copy on the card is no longer used and can be deleted",
                     ignore::IGNORE_NAME
                 );
                 say(&n);
                 created_note = Some(n);
-                Some(sd_ignore)
+                Some(host_ignore)
             }
-            Err(_) => Some(host_ignore),
+            Err(_) => Some(sd_ignore),
         }
     } else {
         match save(ignore::IGNORE_NAME, ignore::DEFAULT_IGNORE_TEXT.as_bytes(), false) {
@@ -224,7 +228,7 @@ fn run_scan(opts: check::Opts) {
 
     // optional manifest: expected size per ROM filename
     let mut manifest: HashMap<String, u64> = HashMap::new();
-    let manifest_path = [SD_ROOT, HOST_DIR]
+    let manifest_path = [HOST_DIR, SD_ROOT]
         .iter()
         .map(|d| format!("{d}/{MANIFEST_NAME}"))
         .find(|p| exists(p));

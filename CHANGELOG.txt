@@ -5,11 +5,15 @@ Platforms, Presets) for missing / empty / orphaned / mismatched ROMs and
 instance .json files. Never changes games, cores or settings; it only writes its
 own report / ignore list files.
 
-v0.1.2 - 2026-11-07
-  - Menu title now shows the plugin version (to tell which build is running)
-  - New menu choice "Default + detailed log (troubleshooting)": logs every folder
-    listed and file opened/read/sized before it happens, so if the host app crashes
-    the last "[trace]" line in the log shows the call that caused it
+v0.2.0 - 2026-11-07
+  - The report, ignore list and optional manifest are now kept in the plugin's own
+    folder on the computer (the "host" folder; in pupdate
+    \plugins\OngoGablogian.pocket-check-plugin\) instead of the root of the SD card.
+    The SD card root is only a fallback if there is no plugin folder or it can't be
+    written to
+  - An ignore list found in the SD card root (created by v0.1.2) is copied to the
+    plugin's folder the first time this version runs (the old copy is left alone)
+  - Menu titles show the plugin version (to tell which build is running)
 
 v0.1.2 - 2026-11-07
   - Pocket-Check-Ignore.txt, Pocket-Check-Report.txt (and the optional
