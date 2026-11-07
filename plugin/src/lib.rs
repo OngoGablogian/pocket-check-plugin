@@ -4,8 +4,8 @@
 //! `pocket/` folder) for missing / empty / orphaned / mismatched ROMs and instance
 //! .json files, and writes a report. It never changes anything on the card.
 //!
-//! Files the user can edit live in the plugin's `host/` folder on their computer
-//! (falling back to the SD root if the host app doesn't provide one):
+//! Files the user can read and edit live in the root of the SD card (falling back to the
+//! plugin's private `host/` folder if the card can't be written to):
 //!   Pocket-Check-Ignore.txt     ignore list (created on first run)
 //!   Pocket-Check-Manifest.json  optional: { "sf2.rom": { "size": 4194304 } }
 //!   Pocket-Check-Report.txt     the report (rewritten every run)
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "0.1.1";
+const VERSION: &str = "0.1.2";
 const REPORT_NAME: &str = "Pocket-Check-Report.txt";
 const MANIFEST_NAME: &str = "Pocket-Check-Manifest.json";
 /// Reports longer than this many lines are summarised in the log (full text is in the file)
@@ -144,40 +144,92 @@ pub fn handle_response(input: HostMessage) -> FnResult<PluginMessage> {
     }
 }
 
-/// The user-editable files go in host/ when the host app provides it, else the SD root.
-fn data_dir() -> &'static str {
-    if fs::read_dir("host").is_ok() { "host" } else { "pocket" }
+/// The files you read and edit live in the root of the SD card, where they are easy to find.
+/// The plugin's private `host/` folder (somewhere inside the updater app's own data) is only
+/// a fallback, e.g. if the card can't be written to.
+const SD_ROOT: &str = "pocket";
+const HOST_DIR: &str = "host";
+
+/// Human-readable location for the log.
+fn show(path: &str) -> String {
+    match path.strip_prefix("pocket/") {
+        Some(name) => format!("the SD card root ({name})"),
+        None => format!("the plugin's host folder ({path})"),
+    }
+}
+
+fn exists(path: &str) -> bool {
+    fs::File::open(path).is_ok()
+}
+
+/// Write a file to the SD card root, or to the host folder if that fails.
+/// `atomic` writes to a .tmp file first and renames it, so a stopped run never leaves half a file.
+fn save(name: &str, data: &[u8], atomic: bool) -> Result<String, String> {
+    let mut errors: Vec<String> = Vec::new();
+    for dir in [SD_ROOT, HOST_DIR] {
+        let path = format!("{dir}/{name}");
+        let res = if atomic {
+            let tmp = format!("{path}.tmp");
+            fs::write(&tmp, data).and_then(|_| fs::rename(&tmp, &path))
+        } else {
+            fs::write(&path, data)
+        };
+        match res {
+            Ok(()) => return Ok(path),
+            Err(e) => errors.push(format!("{path}: {e}")),
+        }
+    }
+    Err(errors.join("; "))
 }
 
 fn run_scan(opts: check::Opts) {
-    let dir = data_dir();
-    let ignore_path = format!("{dir}/{}", ignore::IGNORE_NAME);
-
     // ignore list - created with instructions on the first run
-    let mut created_note = None;
-    if fs::File::open(&ignore_path).is_err() {
-        match fs::write(&ignore_path, ignore::DEFAULT_IGNORE_TEXT) {
+    let sd_ignore = format!("{SD_ROOT}/{}", ignore::IGNORE_NAME);
+    let host_ignore = format!("{HOST_DIR}/{}", ignore::IGNORE_NAME);
+    let mut created_note: Option<String> = None;
+    let ignore_path: Option<String> = if exists(&sd_ignore) {
+        Some(sd_ignore)
+    } else if exists(&host_ignore) {
+        // made by an older version in the host folder: copy it to the SD card root so it can be found
+        match fsx::read_path(&host_ignore).and_then(|b| fs::write(&sd_ignore, &b)) {
             Ok(()) => {
-                let n = format!("Created default ignore list {ignore_path} - see the instructions inside it");
+                let n = format!(
+                    "Copied your ignore list from the plugin's host folder to the SD card root ({})",
+                    ignore::IGNORE_NAME
+                );
                 say(&n);
                 created_note = Some(n);
+                Some(sd_ignore)
             }
-            Err(e) => say(&format!("Could not create {ignore_path}: {e}")),
+            Err(_) => Some(host_ignore),
         }
-    }
-    let (ignore_entries, ignore_src) = match fsx::read_path(&ignore_path) {
-        Ok(bytes) => (
-            ignore::parse_ignore_list(&String::from_utf8_lossy(&bytes)),
-            Some(ignore_path.clone()),
-        ),
-        Err(_) => (Vec::new(), None),
+    } else {
+        match save(ignore::IGNORE_NAME, ignore::DEFAULT_IGNORE_TEXT.as_bytes(), false) {
+            Ok(p) => {
+                let n = format!("Created default ignore list in {} - see the instructions inside it", show(&p));
+                say(&n);
+                created_note = Some(n);
+                Some(p)
+            }
+            Err(e) => {
+                say(&format!("Could not create {}: {e}", ignore::IGNORE_NAME));
+                None
+            }
+        }
+    };
+    let (ignore_entries, ignore_src) = match ignore_path.and_then(|p| fsx::read_path(&p).ok().map(|b| (b, p))) {
+        Some((bytes, p)) => (ignore::parse_ignore_list(&String::from_utf8_lossy(&bytes)), Some(p)),
+        None => (Vec::new(), None),
     };
 
     // optional manifest: expected size per ROM filename
     let mut manifest: HashMap<String, u64> = HashMap::new();
-    let manifest_path = format!("{dir}/{MANIFEST_NAME}");
-    if let Ok(bytes) = fsx::read_path(&manifest_path) {
-        match fsx::parse_json(&bytes) {
+    let manifest_path = [SD_ROOT, HOST_DIR]
+        .iter()
+        .map(|d| format!("{d}/{MANIFEST_NAME}"))
+        .find(|p| exists(p));
+    if let Some(manifest_path) = manifest_path {
+        match fsx::read_path(&manifest_path).map_err(|e| e.to_string()).and_then(|b| fsx::parse_json(&b)) {
             Ok(v) => {
                 if let Some(obj) = v.as_object() {
                     for (k, e) in obj {
@@ -202,10 +254,8 @@ fn run_scan(opts: check::Opts) {
     };
 
     let header = format!("Pocket-Check v{VERSION} (plugin) - {}\n\n", timestamp());
-    let report_path = format!("{dir}/{REPORT_NAME}");
     let full = format!("{header}{}\n", out.text);
-    let tmp = format!("{report_path}.tmp");
-    let saved = fs::write(&tmp, &full).and_then(|_| fs::rename(&tmp, &report_path));
+    let saved = save(REPORT_NAME, full.as_bytes(), true);
 
     say("");
     if out.text.lines().count() <= MAX_LOG_LINES || saved.is_err() {
@@ -221,9 +271,9 @@ fn run_scan(opts: check::Opts) {
             format!("{} problem(s) found.", out.problems)
         });
     }
-    match saved {
-        Ok(()) => say(&format!("\nReport written to {report_path}")),
-        Err(e) => say(&format!("\nCould not write report file {report_path}: {e}")),
+    match &saved {
+        Ok(p) => say(&format!("\nReport written to {}", show(p))),
+        Err(e) => say(&format!("\nCould not write the report file ({REPORT_NAME}): {e}")),
     }
 }
 

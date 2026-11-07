@@ -4,8 +4,8 @@ An [openFPGA Pocket updater plugin](https://github.com/openfpga-library/pocket-p
 hosts) that scans your Analogue Pocket SD card for missing, empty, orphaned or mismatched ROMs and
 instance `.json` files, and writes a report. It is a Rust port of the `Pocket-Check.py` script.
 
-Pocket-Check is **read-only**: it never changes anything on the SD card. The only files it writes are its
-own report and ignore list, in the plugin's folder on your computer.
+Pocket-Check never changes your games, cores or settings. The only files it writes are its own report and ignore
+list (plus an optional manifest you create yourself), in the root of the SD card.
 
 ## Features
 
@@ -69,14 +69,17 @@ The `.sav` and Analogizer items can be included from the menu. The beta items ar
 
 ## Files
 
-These live in the plugin's folder on your computer (the host app's per-plugin `host/` folder). If the host app
-doesn't provide one, they are placed in the root of the SD card instead.
+These are in the root of the SD card, where they are easy to find and edit. If the card can't be written to, the
+plugin uses its own private folder inside the updater app's data instead (the log says where each file ended up).
 
 | File | Purpose |
 | --- | --- |
 | `Pocket-Check-Ignore.txt` | Your ignore list. Created with instructions the first time the plugin runs. |
 | `Pocket-Check-Report.txt` | The full report. Rewritten on every run. |
 | `Pocket-Check-Manifest.json` | Optional. Expected ROM sizes: `{ "sf2.rom": { "size": 4194304 } }` (keys are matched case-insensitively). |
+
+An ignore list created by an earlier version in the plugin's private folder is copied to the SD card root the first
+time you run the newer version.
 
 ### Ignore list
 

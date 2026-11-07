@@ -2,7 +2,25 @@ Pocket-Check (plugin) - Changelog
 =================================
 openFPGA Pocket updater plugin. Scans the Pocket SD card (Assets, Cores,
 Platforms, Presets) for missing / empty / orphaned / mismatched ROMs and
-instance .json files. Read-only: nothing on the card is ever changed.
+instance .json files. Never changes games, cores or settings; it only writes its
+own report / ignore list files.
+
+v0.1.2 - 2026-11-07
+  - Menu title now shows the plugin version (to tell which build is running)
+  - New menu choice "Default + detailed log (troubleshooting)": logs every folder
+    listed and file opened/read/sized before it happens, so if the host app crashes
+    the last "[trace]" line in the log shows the call that caused it
+
+v0.1.2 - 2026-11-07
+  - Pocket-Check-Ignore.txt, Pocket-Check-Report.txt (and the optional
+    Pocket-Check-Manifest.json) now live in the root of the SD card instead of the
+    plugin's private "host" folder, which is hidden somewhere in the updater app's
+    data and hard to find. The host folder is only a fallback if the card can't be
+    written to
+  - An ignore list found in the host folder (created by v0.1.0 / v0.1.1) is copied to the
+    SD card root the first time this version runs
+  - The log now says where each file was written ("the SD card root (...)" or
+    "the plugin's host folder (...)") and reports clearly if a write fails
 
 v0.1.1 - 2026-11-07
   - Fixed a crash while scanning ("panicked ... SystemTimeError(11644473600s)" in
@@ -22,10 +40,10 @@ v0.1.0 - 2026-11-07
   - Menu instead of command-line options:
       Scan the whole card / Scan one platform... (id or glob, comma separated)
       Default / Also check .sav / Also check Analogizer/CRT / Check both
-  - Files live in the plugin's host/ folder (SD root if the host app has none):
-      Pocket-Check-Ignore.txt     created with instructions on first run
-      Pocket-Check-Report.txt     rewritten on every run
-      Pocket-Check-Manifest.json  optional, { "file.rom": {"size": 1234} }
+  - Files: Pocket-Check-Ignore.txt (created with instructions on first run),
+    Pocket-Check-Report.txt (rewritten on every run), optional
+    Pocket-Check-Manifest.json ({ "file.rom": {"size": 1234} }); v0.1.0 kept
+    them in the plugin's host folder, v0.1.2 moved them to the SD card root
   - Long reports are summarised in the log (counts per category); the full
     text is always in Pocket-Check-Report.txt
 
