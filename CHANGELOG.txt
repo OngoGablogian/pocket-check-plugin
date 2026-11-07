@@ -4,6 +4,14 @@ openFPGA Pocket updater plugin. Scans the Pocket SD card (Assets, Cores,
 Platforms, Presets) for missing / empty / orphaned / mismatched ROMs and
 instance .json files. Read-only: nothing on the card is ever changed.
 
+v0.1.1 - 2026-11-07
+  - Fixed a crash while scanning ("panicked ... SystemTimeError(11644473600s)" in
+    wasi-common): the host app panics when a file's timestamp is before 1970 (e.g.
+    1601-01-01 on files written by devices without a clock) and the plugin asked
+    it for that file's details. The plugin no longer asks for file metadata at all:
+    folder/file type comes from the directory listing, sizes from seeking to the
+    end of the file, and files are read in chunks instead of with fs::read
+
 v0.1.0 - 2026-11-07
   - First version: Rust port of Pocket-Check.py v0.6.1 for
     https://github.com/openfpga-library/pocket-plugin

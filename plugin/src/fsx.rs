@@ -6,7 +6,8 @@
 
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
 
 pub const ROOT: &str = "pocket";
 
@@ -61,16 +62,35 @@ pub fn normpath(p: &str) -> String {
     out.join("/")
 }
 
+// NOTE: nothing here may call fs::metadata, File::metadata or fs::read (which stats the file
+// for its size). The host (wasi-common) panics - killing the whole plugin - when a file's
+// timestamp is before 1970, e.g. 1601-01-01 on SD cards written by devices without a clock.
+
 pub fn is_dir(rel: &str) -> bool {
-    fs::metadata(abs(rel)).map(|m| m.is_dir()).unwrap_or(false)
+    fs::read_dir(abs(rel)).is_ok()
 }
 
 pub fn is_file(rel: &str) -> bool {
-    fs::metadata(abs(rel)).map(|m| m.is_file()).unwrap_or(false)
+    !is_dir(rel) && File::open(abs(rel)).is_ok()
 }
 
 pub fn file_size(rel: &str) -> u64 {
-    fs::metadata(abs(rel)).map(|m| m.len()).unwrap_or(0)
+    File::open(abs(rel)).and_then(|mut f| f.seek(SeekFrom::End(0))).unwrap_or(0)
+}
+
+/// Read a whole file without asking the host for its metadata.
+pub fn read_path(path: &str) -> std::io::Result<Vec<u8>> {
+    let mut f = File::open(path)?;
+    let mut out = Vec::new();
+    let mut buf = [0u8; 16384];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+    Ok(out)
 }
 
 pub fn parse_json(bytes: &[u8]) -> Result<Value, String> {
@@ -80,7 +100,7 @@ pub fn parse_json(bytes: &[u8]) -> Result<Value, String> {
 }
 
 pub fn read_json(rel: &str) -> Result<Value, String> {
-    let bytes = fs::read(abs(rel)).map_err(|e| e.to_string())?;
+    let bytes = read_path(&abs(rel)).map_err(|e| e.to_string())?;
     parse_json(&bytes)
 }
 
@@ -116,7 +136,7 @@ pub fn glob(pat: &str, text: &str) -> bool {
 /// Directory listing cache plus the few helpers that need it.
 #[derive(Default)]
 pub struct Fs {
-    ls: HashMap<String, Vec<String>>,
+    ls: HashMap<String, Vec<(String, bool)>>,
 }
 
 impl Fs {
@@ -124,22 +144,34 @@ impl Fs {
         Self::default()
     }
 
-    /// Sorted names in a folder, without macOS "._*" AppleDouble entries.
-    pub fn listdir(&mut self, rel: &str) -> Vec<String> {
+    /// Sorted (name, is_folder) pairs, without macOS "._*" AppleDouble entries. The folder
+    /// flag comes from the directory listing itself, so no per-file stat is needed.
+    fn typed(&mut self, rel: &str) -> Vec<(String, bool)> {
         if let Some(v) = self.ls.get(rel) {
             return v.clone();
         }
-        let mut names: Vec<String> = match fs::read_dir(abs(rel)) {
+        let mut ents: Vec<(String, bool)> = match fs::read_dir(abs(rel)) {
             Ok(rd) => rd
                 .filter_map(|e| e.ok())
-                .filter_map(|e| e.file_name().into_string().ok())
-                .filter(|n| !n.starts_with("._"))
+                .filter_map(|e| {
+                    let name = e.file_name().into_string().ok()?;
+                    if name.starts_with("._") {
+                        return None;
+                    }
+                    let is_folder = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    Some((name, is_folder))
+                })
                 .collect(),
             Err(_) => Vec::new(),
         };
-        names.sort();
-        self.ls.insert(rel.to_string(), names.clone());
-        names
+        ents.sort_by(|a, b| a.0.cmp(&b.0));
+        self.ls.insert(rel.to_string(), ents.clone());
+        ents
+    }
+
+    /// Sorted names in a folder.
+    pub fn listdir(&mut self, rel: &str) -> Vec<String> {
+        self.typed(rel).into_iter().map(|(n, _)| n).collect()
     }
 
     /// Resolve `rel` under `root`. Returns (path as it is on the card, letter case differs).
@@ -172,9 +204,9 @@ impl Fs {
         while let Some(dir) = stack.pop() {
             let mut files = Vec::new();
             let mut dirs = Vec::new();
-            for n in self.listdir(&dir) {
+            for (n, is_folder) in self.typed(&dir) {
                 let p = join(&dir, &n);
-                if is_dir(&p) {
+                if is_folder {
                     if dir == top && skip_top(&n) {
                         continue;
                     }

@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "0.1.0";
+const VERSION: &str = "0.1.1";
 const REPORT_NAME: &str = "Pocket-Check-Report.txt";
 const MANIFEST_NAME: &str = "Pocket-Check-Manifest.json";
 /// Reports longer than this many lines are summarised in the log (full text is in the file)
@@ -146,7 +146,7 @@ pub fn handle_response(input: HostMessage) -> FnResult<PluginMessage> {
 
 /// The user-editable files go in host/ when the host app provides it, else the SD root.
 fn data_dir() -> &'static str {
-    if fs::metadata("host").map(|m| m.is_dir()).unwrap_or(false) { "host" } else { "pocket" }
+    if fs::read_dir("host").is_ok() { "host" } else { "pocket" }
 }
 
 fn run_scan(opts: check::Opts) {
@@ -155,7 +155,7 @@ fn run_scan(opts: check::Opts) {
 
     // ignore list - created with instructions on the first run
     let mut created_note = None;
-    if fs::metadata(&ignore_path).is_err() {
+    if fs::File::open(&ignore_path).is_err() {
         match fs::write(&ignore_path, ignore::DEFAULT_IGNORE_TEXT) {
             Ok(()) => {
                 let n = format!("Created default ignore list {ignore_path} - see the instructions inside it");
@@ -165,7 +165,7 @@ fn run_scan(opts: check::Opts) {
             Err(e) => say(&format!("Could not create {ignore_path}: {e}")),
         }
     }
-    let (ignore_entries, ignore_src) = match fs::read(&ignore_path) {
+    let (ignore_entries, ignore_src) = match fsx::read_path(&ignore_path) {
         Ok(bytes) => (
             ignore::parse_ignore_list(&String::from_utf8_lossy(&bytes)),
             Some(ignore_path.clone()),
@@ -176,7 +176,7 @@ fn run_scan(opts: check::Opts) {
     // optional manifest: expected size per ROM filename
     let mut manifest: HashMap<String, u64> = HashMap::new();
     let manifest_path = format!("{dir}/{MANIFEST_NAME}");
-    if let Ok(bytes) = fs::read(&manifest_path) {
+    if let Ok(bytes) = fsx::read_path(&manifest_path) {
         match fsx::parse_json(&bytes) {
             Ok(v) => {
                 if let Some(obj) = v.as_object() {
